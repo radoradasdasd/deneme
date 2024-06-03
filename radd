@@ -1,0 +1,194 @@
+
+kapat='\033[0m'
+beyaz='\033[1;37m'
+kirmizi='\033[1;31m'
+mavi='\033[1;36m'
+sari='\033[1;33m'
+yesil='\033[1;32m'
+kmavi='\033[1;34m'
+pembe='\033[1;35m'
+kkirmizi='\033[0;31m'
+kkmavi='\033[0;36m'
+ksari='\033[0;33m'
+kyesil='\033[0;32m'
+kamavi='\033[0;34m'
+kpembe='\033[0;35m'
+
+function header() {
+    clear
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e "${beyaz}|         ${kyesil}Dosya Transferi Scripti${beyaz}           |${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+}
+
+function detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$NAME
+        install_sshpass
+    else
+        echo -e "${kirmizi}İşletim sistemi tespit edilemedi!${kapat}"
+        exit 1
+    fi
+}
+
+function install_sshpass() {
+    if ! command -v sshpass &> /dev/null; then
+        echo -e "${beyaz}sshpass kurulumu gerekiyor.${kapat}"
+        if [[ "$OS" == "Ubuntu" || "$OS" == "Debian" ]]; then
+            sudo apt-get update
+            sudo apt-get install sshpass -y
+        elif [[ "$OS" == "CentOS" ]]; then
+            sudo yum install epel-release -y
+            sudo yum install sshpass -y
+        fi
+    else
+        echo -e "${yesil}sshpass zaten kurulu.${kapat}"
+    fi
+}
+
+function yedekleme_secimi() {
+    header
+    echo -e "${beyaz}| Yedekleme Türünü Seçin:                    |${kapat}"
+    echo -e "${beyaz}|      (${yesil}1${beyaz}) » Sistem Dosyalarını Aktar          |${kapat}"
+    echo -e "${beyaz}|      (${yesil}2${beyaz}) » Tek Tek Dosya/Klasör Aktar        |${kapat}"
+    echo -e "${beyaz}|      (${yesil}3${beyaz}) » Otomatik Aktarım Yedekleme        |${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e -n "${beyaz}| » Seçenek: ${kapat}"
+    read yedek_secimi
+    case $yedek_secimi in
+        1) sistem_dosyalari_secimi ;;
+        2) dosya_secimi ;;
+        3) otomatik_yedekleme_secimi ;;
+    esac
+}
+
+function otomatik_yedekleme_secimi() {
+    header
+    echo -e "${beyaz}| Otomatik yedekleme sıklığını seçin:        |${kapat}"
+    echo -e "${beyaz}|      (${yesil}1${beyaz}) » Her saat başı                    |${kapat}"
+    echo -e "${beyaz}|      (${yesil}2${beyaz}) » Günlük                            |${kapat}"
+    echo -e "${beyaz}|      (${yesil}3${beyaz}) » Haftalık                          |${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e -n "${beyaz}| » Seçenek: ${kapat}"
+    read otomatik_secimi
+    case $otomatik_secimi in
+        1) crontab_guncelle "@hourly" ;;
+        2) crontab_guncelle "@daily" ;;
+        3) crontab_guncelle "@weekly" ;;
+        *) echo -e "${kirmizi}Geçersiz seçenek! Lütfen tekrar deneyiniz.${kapat}"; otomatik_yedekleme_secimi ;;
+    esac
+}
+
+function crontab_guncelle() {
+    zamanlama=$1
+    crontab -l | { cat; echo "$zamanlama sshpass -p '$sifre' rsync -avz --progress $dosyalar $kullanici_adi@$hedef_ip:$hedef_klasor"; } | crontab -
+    echo -e "${yesil}Cron job $zamanlama olarak ayarlandı.${kapat}"
+}
+
+
+function sistem_dosyalari_secimi() {
+    header
+    echo -e "${beyaz}| Hangi sistem dosyalarını aktarmak istiyorsunuz? |${kapat}"
+    echo -e "${beyaz}|      (${yesil}1${beyaz}) » /root                            |${kapat}"
+    echo -e "${beyaz}|      (${yesil}2${beyaz}) » /home                            |${kapat}"
+    echo -e "${beyaz}|      (${yesil}3${beyaz}) » /etc                             |${kapat}"
+    echo -e "${beyaz}|      (${yesil}4${beyaz}) » /var                             |${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e -n "${beyaz}| » Seçenek: ${kapat}"
+    read dosya_secimi
+    clear
+    case $dosya_secimi in
+        1) dosyalar="/root/*" ;;
+        2) dosyalar="/home/*" ;;
+        3) dosyalar="/etc/*" ;;
+        4) dosyalar="/var/*" ;;
+        *) echo -e "${kirmizi}Geçersiz seçenek!${kapat}" && sistem_dosyalari_secimi ;;
+    esac
+
+    echo -e "${beyaz}Dosyaları nereye aktarmak istersiniz?:${kapat}"
+    echo -e "${beyaz}|      (${yesil}1${beyaz}) » Ana dizine doğrudan aktar         |${kapat}"
+    echo -e "${beyaz}|      (${yesil}2${beyaz}) » Yeni klasör oluştur ve oraya aktar${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e -n "${beyaz}| » Seçenek: ${kapat}"
+    read transfer_secimi
+
+    if [[ "$transfer_secimi" == "2" ]]; then
+        sshpass -p "$sifre" ssh $kullanici_adi@$hedef_ip "mkdir -p /root/nexusaktarim"
+        hedef_klasor="nexusaktarim"
+    else
+        hedef_klasor="/"
+
+    fi
+
+    dosya_transferi "$hedef_klasor"
+    clear
+}
+
+function dosya_secimi() {
+    header
+    echo -e "\n${beyaz}Mevcut dizindeki dosyalar:${kapat}"
+    local dosyalar=($(ls -1))
+    local index=1
+
+    for dosya in "${dosyalar[@]}"; do
+        echo -e "${beyaz}${index}) $dosya${kapat}"
+        ((index++))
+    done
+
+    echo -e "\n${beyaz}Aktarılacak dosyaların numaralarını boşluk bırakarak girin (örn: 1 3 5):${kapat}"
+    read -a secilenler
+
+    local secilen_dosyalar=""
+    for secim in "${secilenler[@]}"; do
+        ((secim--))  
+        secilen_dosyalar+="${dosyalar[secim]} "
+    done
+
+    dosyalar=$secilen_dosyalar
+    dosya_yer_secimi
+}
+
+function dosya_yer_secimi() {
+    echo -e "${beyaz}Dosyaları nereye aktarmak istersiniz?:${kapat}"
+    echo -e "${beyaz}|      (${yesil}1${beyaz}) » /root altına direkt aktar         |${kapat}"
+    echo -e "${beyaz}|      (${yesil}2${beyaz}) » '/root/nexusaktarim' içinde yeni bir klasör oluştur${kapat}"
+    echo -e "${beyaz}+---------------------------------------------+${kapat}"
+    echo -e -n "${beyaz}| » Seçenek: ${kapat}"
+    read transfer_secimi
+    if [[ "$transfer_secimi" == "2" ]]; then
+        sshpass -p "$sifre" ssh $kullanici_adi@$hedef_ip "mkdir -p /root/nexusaktarim"
+        hedef_klasor="/root/nexusaktarim/"
+    else
+        hedef_klasor="/root/"
+    fi
+
+    dosya_transferi "$hedef_klasor"
+}
+
+function dosya_transferi() {
+    local hedef_klasor=$1
+    header
+    echo -e "${beyaz}Dosyalar '${hedef_klasor}' dizinine aktarılıyor...${kapat}"
+    sshpass -p "$sifre" rsync -avz --progress $dosyalar $kullanici_adi@$hedef_ip:$hedef_klasor
+    echo -e "${yesil}Dosyalar başarıyla $OS sunucusuna aktarıldı.${kapat}"
+}
+
+function bilgi_al() {
+    header
+    echo -e "${beyaz}Hedef sunucu IP adresi:${kapat}"
+    read hedef_ip
+    echo -e "${beyaz}Hedef sunucu kullanıcı adı:${kapat}"
+    read kullanici_adi
+    echo -e "${beyaz}Hedef sunucunun şifresi:${kapat}"
+    read -s sifre
+}
+
+function main() {
+    detect_os
+    bilgi_al
+    yedekleme_secimi
+    echo -e "${beyaz}İşlem tamamlandı. Çıkılıyor...${kapat}"
+}
+
+main
